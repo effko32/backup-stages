@@ -1,0 +1,23 @@
+trigger:
+- none
+
+# UTC
+schedules:
+- cron: "30 18 * * *"
+  displayName: Daily
+  always: true
+  branches:
+    include:
+    - main
+
+pool:
+  name: default
+
+jobs:
+  - job: BackupStage 
+    steps: 
+    - task: PowerShell@2
+      displayName: 'Backup Stages'
+      inputs:
+        filePath: 'scripts\backup-stages.ps1'
+        arguments: '-configPath "$(configPath)" -ps_user "$(ps_user)" -ps_pass "$(ps_pass)" -pathBackup "$(pathBackup)"'
