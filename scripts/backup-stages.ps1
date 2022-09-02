@@ -12,9 +12,9 @@ Import-Module WebAdministration
 Import-Module IISAdministration
 
 $date=$($(Get-Date -Format yyyyMMdd_HHmmss))
-$daysCount=(New-TimeSpan -Start $(Get-Date -Month 09 -Day 1 -Year 2022) -End $(Get-Date)).TotalDays
+$daysCount=[int](New-TimeSpan -Start $(Get-Date -Month 09 -Day 1 -Year 2022) -End $(Get-Date)).TotalDays
 
-Set-Alias pg_dump "C:\Program Files\PostgreSQL\12\bin\pg_dump.exe"
+Set-Alias pg_dump ".\pg_dump\pg_dump.exe"
 Set-Alias sz "C:\Program Files\7-Zip\7z.exe"
 
 # Разбираем json
@@ -51,6 +51,7 @@ $ostatok=$daysCount % $cron
 if ($ostatok -eq 0)
 {
   Write-Output "Starting cronBackup - Stage Name:$stgname Days:$day Cron:$cron Ostatok:$ostatok"
+  # $consulHost = (Invoke-WebRequest -Uri "http://consul.domain.local:8500/v1/kv/Staging/stages/$stgname/proxy?raw" -UseBasicParsing)
   foreach ($h in $hosts_ips)
   {
   $pw = convertto-securestring -AsPlainText -Force -String "$ps_pass"
