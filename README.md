@@ -1,8 +1,8 @@
-# Список переменных пайплайна
-1. configPath - путь до файла stages.json с настройками
-2. pathBackup - путь для резервного копирования
-3. ps_user - пользователь для подключения
-4. ps_pass - пароль
+# Variables:
+1. configPath - path to stages.json
+2. pathBackup - path to backup-folder
+3. ps_user - user
+4. ps_pass - password
 
 
 https://github.com/effko32/backup-stages
