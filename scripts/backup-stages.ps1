@@ -11,23 +11,35 @@ Import-Module Microsoft.PowerShell.Management
 Import-Module WebAdministration
 Import-Module IISAdministration
 
-$date=$($(Get-Date -Format yyyyMMdd_HHmmss))
+$date=$($(Get-Date -Format yyyyMMdd_HHmm))
 $daysCount=[int](New-TimeSpan -Start $(Get-Date -Month 09 -Day 1 -Year 2022) -End $(Get-Date)).TotalDays
+# Number day in week
+$numDayWeek = (Get-Date).DayOfWeek.value__
+# Number week on month
+$numWeekMonth = (Get-WmiObject Win32_LocalTime).weekinmonth
+# Date day
+$dayNow = (Get-Date).Day
 
 Set-Alias pg_dump ".\pg_dump\pg_dump.exe"
 Set-Alias sz "C:\Program Files\7-Zip\7z.exe"
 
-# Разбираем json
+# Parse json config file
 $json=Get-Content $configPath | ConvertFrom-Json
 $stgnames = ($json.stages).stgname
 $days = ($json.stages).days
 $crons = ($json.stages).cron
-# Собираем в массив
+$dayly = ($json.stages).dayly
+$weekly = ($json.stages).weekly
+$monthly = ($json.stages).monthly
+# To array
 $PSObjectArray = for ($i = 0; $i -lt $stgnames.Count; $i++) {
     [PSCustomObject]@{
         stgname = $stgnames[$i]
         days = $days[$i]
         cron = $crons[$i]
+        dayly = $dayly[$i]
+        weekly = $weekly[$i]
+        monthly = $monthly[$i]
     }
 }
 
@@ -36,31 +48,41 @@ $hosts_ips = ($json.hosts).ip
 Write-Output "Stage Names: $stgnames"
 Write-Output "Days List: $days"
 Write-Output "Crons List: $crons"
+Write-Output "Dayly List: $dayly"
+Write-Output "Weekly List: $weekly"
+Write-Output "Monthly List: $monthly"
 
 foreach ($stgarray in $PSObjectArray)
 {
 $stgname=$stgarray.stgname
 $day=$stgarray.days
 $cron=$stgarray.cron
+$dayly=$stgarray.dayly
+$weekly=$stgarray.weekly
+$monthly=$stgarray.monthly
 Write-Output "---------------------------------"
 Write-Output "stgname: $stgname"
 Write-Output "Days: $day"
 Write-Output "Cron: $cron"
-# Проверка крона, если делится на $cron без остатка
+Write-Output "Dayly: $dayly"
+Write-Output "Weekly: $weekly"
+Write-Output "Monthly: $monthly"
+# Checking cron mod 0
 $ostatok=$daysCount % $cron
 if ($ostatok -eq 0)
 {
   Write-Output "Starting cronBackup - Stage Name:$stgname Days:$day Cron:$cron Ostatok:$ostatok"
   # $consulHost = (Invoke-WebRequest -Uri "http://consul.domain.local:8500/v1/kv/Staging/stages/$stgname/proxy?raw" -UseBasicParsing)
+  # foreach ($h in $consulHost)
   foreach ($h in $hosts_ips)
   {
   $pw = convertto-securestring -AsPlainText -Force -String "$ps_pass"
   $cred = new-object -typename System.Management.Automation.PSCredential -argumentlist "$ps_user",$pw
 
-  # Проверяем путь до директории стенда
+  # Checkin path to folder stage
   if ((Invoke-Command -ComputerName $h -Credential $cred  -ScriptBlock {$(Get-WebFilePath -PSPath "IIS:\Sites\$using:stgname")} -erroraction 'silentlycontinue'))
   {
-    # Создаем папку для бэкапа
+    # Create folder for backup
     $webcatalog=$(Invoke-Command -ComputerName $h -Credential $cred -ScriptBlock {$(Get-WebFilePath -PSPath "IIS:\Sites\$using:stgname")})
     if (!(Test-Path -Path $pathBackup\$stgName)) 
     { 
@@ -73,7 +95,7 @@ if ($ostatok -eq 0)
     Write-Output "Web Directory: $h - $webcatalog"
     Write-Output "Connection String: $h - $connstring"
 
-    # Берем нужные значения из ConnectionStrings
+    # Parsing ConnectionStrings
     foreach ($stringdb in $connstring)
     {
     
@@ -113,27 +135,51 @@ if ($ostatok -eq 0)
     Write-Output "MS SQL DB: "$msdbname.Value""
     }
 
-    # Бэкапим БД если Postgresql
+    If (($monthly) -and ($dayNow -eq 1))
+    {
+        $prefix = "MONTHLY"
+    }
+    elseif (($weekly) -and ($numDayWeek -eq 7))
+    {
+        $prefix = "WEEKLY-$numWeekMonth"
+    }
+    else
+    {
+        $prefix = "DAYLY"
+    }
+    
+    # Backup db if Postgres
     if ( $PGHOST.Value )
     {
     $env:PGPASSWORD = $PASSWORD.Value
-    pg_dump -h $PGHOST.Value -d $PGDATABASE.Value -p $PGPORT.Value -U $USER.Value -F c -Z 9 --file="$pathBackup\$stgname\$stgname-$date.backup"
+    pg_dump -h $PGHOST.Value -d $PGDATABASE.Value -p $PGPORT.Value -U $USER.Value -F c -Z 9 --file="$pathBackup\$stgname\$stgname-$date-$prefix.backup"
     }
 
-    # Бэкапим БД если MS SQL Server
+    # Backup db if MSSQL
     elseif ( $msdatasource.Value )
     {
     $secPassword = ConvertTo-SecureString $PASSWORD.Value -AsPlainText -Force
     $credential = New-Object System.Management.Automation.PSCredential -ArgumentList $USER.Value,$secPassword
-    Invoke-Command -ComputerName $h -Credential $cred  -ScriptBlock {Backup-SqlDatabase -ServerInstance $using:msdatasource.Value -Credential $using:credential -Database $using:msdbname.Value -CompressionOption "On" -BackupFile "$using:pathBackup\$using:stgname\$using:stgname-$using:date.bak"}
+    Invoke-Command -ComputerName $h -Credential $cred  -ScriptBlock {Backup-SqlDatabase -ServerInstance $using:msdatasource.Value -Credential $using:credential -Database $using:msdbname.Value -CompressionOption "On" -BackupFile "$using:pathBackup\$using:stgname\$using:stgname-$using:date-$using:prefix.bak"}
     }
 
-    # Бэкапим web-директорию
+    # Backup web-folder
     Invoke-Command -ComputerName $h -Credential $cred -ScriptBlock {
     Get-PSDrive V -erroraction 'silentlycontinue' | Remove-PSDrive -erroraction 'silentlycontinue'
     New-PSDrive -Name 'V' -PSProvider 'FileSystem' -Root "$using:pathBackup\$using:stgname" -Persist -Scope 'Global' -Credential $using:cred
-    & "C:\Program Files\7-Zip\7z.exe" "a" "V:\$using:stgname-$using:date.zip" $using:webcatalog
-    Get-ChildItem "V:\$stgname\" -Recurse -File | Where CreationTime -lt  (Get-Date).AddDays($using:day)  | Remove-Item -Force
+    & "C:\Program Files\7-Zip\7z.exe" "a" "V:\$using:stgname-$using:date-$using:prefix.zip" $using:webcatalog
+    # Delete dayly backups
+    Get-ChildItem "V:\$stgname\" -Recurse -File -Exclude *MONTHLY.*, *WEEKLY*.* | Where CreationTime -lt  (Get-Date).AddDays($using:day)  | Remove-Item -Exclude *MONTHLY.*, *WEEKLY*.* -Force -Verbose 4>&1 | Foreach-Object{ `
+        Write-Host ($_.Message -replace'(.*)Target "(.*)"(.*)','Removing File $2') -ForegroundColor Yellow
+}
+    # Delete weekly backups
+    Get-ChildItem "V:\$stgname\" -Recurse -File -Exclude *DAYLY.*, *MONTHLY.* | Where CreationTime -lt  (Get-Date).AddMonths($using:weekly)  | Remove-Item -Exclude *DAYLY.*, *MONTHLY.* -Force -Verbose 4>&1 | Foreach-Object{ `
+        Write-Host ($_.Message -replace'(.*)Target "(.*)"(.*)','Removing File $2') -ForegroundColor Yellow
+}
+    # Delete monthly backups
+    Get-ChildItem "V:\$stgname\" -Recurse -File -Exclude *DAYLY.*, *WEEKLY*.* | Where CreationTime -lt  (Get-Date).AddMonths($using:monthly)  | Remove-Item -Exclude *DAYLY.*, *WEEKLY*.* -Force -Verbose 4>&1 | Foreach-Object{ `
+        Write-Host ($_.Message -replace'(.*)Target "(.*)"(.*)','Removing File $2') -ForegroundColor Yellow
+}    
     Get-PSDrive V | Remove-PSDrive
     }
 }

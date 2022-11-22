@@ -3,7 +3,9 @@
         {
             "stgname": "stage-1",
             "days": "-14",
-            "cron": "2"
+            "cron": "2",
+            "weekly": "-1",
+            "monthly": "-3"
         },
         {
             "stgname": "stage-2",
